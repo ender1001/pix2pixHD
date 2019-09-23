@@ -1,7 +1,6 @@
 import os.path
 from data.base_dataset import BaseDataset, get_params, get_transform, normalize
 from data.image_folder import make_dataset
-from PIL import Image
 
 class AlignedDataset(BaseDataset):
     def initialize(self, opt):
@@ -31,38 +30,40 @@ class AlignedDataset(BaseDataset):
             self.feat_paths = sorted(make_dataset(self.dir_feat))
 
         self.dataset_size = len(self.A_paths) 
-      
+    
+    
+    def im_trans(frame,r_rotate,r_crop_size,r_image):
+
+        im=imutils.rotate(frame,r_rotate)
+        #pad with zeros
+        im=im[r_crop_size:512-r_crop_size,r_crop_size:640-r_crop_size]
+        im = cv2.resize(im, dsize=(640, 512), interpolation=cv2.INTER_CUBIC).astype(np.float32)
+
+        im = (im-r_image[0])*r_image[1]
+        im=torch.tensor(im)
+
+        return im
+        
+    
     def __getitem__(self, index):        
         ### input A (label maps)
+        r_image=(np.random.rand(2)*0.2*2+1-aug_inten)*np.array([1041.0,147.0])
+        r_crop_size=random.randint(0, 64)
+        r_rotate=random.randint(0, 360)
+        
         A_path = self.A_paths[index]              
-        A = Image.open(A_path)        
-        params = get_params(self.opt, A.size)
-        if self.opt.label_nc == 0:
-            transform_A = get_transform(self.opt, params)
-            A_tensor = transform_A(A.convert('RGB'))
-        else:
-            transform_A = get_transform(self.opt, params, method=Image.NEAREST, normalize=False)
-            A_tensor = transform_A(A) * 255.0
+        A = cv2.imread(A_path)[::2,::2]       
+        A_tensor = im_trans(A,r_rotate,r_crop_size,r_image)
+
 
         B_tensor = inst_tensor = feat_tensor = 0
         ### input B (real images)
         if self.opt.isTrain or self.opt.use_encoded_image:
             B_path = self.B_paths[index]   
-            B = Image.open(B_path).convert('RGB')
-            transform_B = get_transform(self.opt, params)      
-            B_tensor = transform_B(B)
+            B = cv2.imread(B_path)[::2,::2]   
+            B_tensor = im_trans(B,r_rotate,r_crop_size,r_image)
 
-        ### if using instance maps        
-        if not self.opt.no_instance:
-            inst_path = self.inst_paths[index]
-            inst = Image.open(inst_path)
-            inst_tensor = transform_A(inst)
-
-            if self.opt.load_features:
-                feat_path = self.feat_paths[index]            
-                feat = Image.open(feat_path).convert('RGB')
-                norm = normalize()
-                feat_tensor = norm(transform_A(feat))                            
+                     
 
         input_dict = {'label': A_tensor, 'inst': inst_tensor, 'image': B_tensor, 
                       'feat': feat_tensor, 'path': A_path}
